@@ -88,7 +88,7 @@ async function fetchCampaignNames(apiKey) {
 
 async function fetchAllMessages(apiKey, minDate, maxDate, campaignIds) {
   const perPage = 100;
-  const maxPages = 20; // safety cap: up to 2,000 messages
+  const maxPages = 100; // safety cap: up to 10,000 messages (Apollo allows up to 500 pages/50,000 total)
   let all = [];
   for (let page = 1; page <= maxPages; page++) {
     const params = {
@@ -103,8 +103,11 @@ async function fetchAllMessages(apiKey, minDate, maxDate, campaignIds) {
     const res = await apolloFetch(apiKey, `${BASE}/emailer_messages/search`, params, campaignIds && campaignIds.length ? { "emailer_campaign_ids[]": campaignIds } : {});
     const batch = res.emailer_messages || res.emailer_message || res.messages || [];
     all = all.concat(batch);
-    const totalPages = res.pagination?.total_pages || res.total_pages || 1;
-    if (page >= totalPages || batch.length < perPage) break;
+    // Stop once a page comes back with fewer than a full page of results — that's
+    // the last page. We deliberately don't trust a `total_pages`-style field here:
+    // Apollo's pagination metadata key isn't consistently documented, and trusting
+    // a missing/mis-keyed field caused this to stop after page 1 previously.
+    if (batch.length < perPage) break;
   }
   return all;
 }
