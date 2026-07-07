@@ -1,18 +1,31 @@
-// Netlify Function: pulls Apollo.io outreach email data and returns aggregated
-// stats for the dashboard. Requires a MASTER Apollo API key (Search for Outreach
-// Emails / Search for Sequences both require master-key access).
+// Netlify Function: pulls Apollo.io outreach email data for the dashboard.
+// Requires a MASTER Apollo API key (both the outreach-email search and the
+// sequence search endpoints require master-key access).
 //
 // Setup:
 //   1. In Apollo: Settings > Integrations > API > create a MASTER API key.
 //   2. In Netlify: Site settings > Environment variables > add APOLLO_API_KEY.
 //   3. Redeploy. The dashboard calls GET /.netlify/functions/apollo-stats.
 //
-// Optional query params on the function itself:
+// This function returns ONE CHUNK of raw (normalized) messages per call, not a
+// fully-aggregated report — Apollo's search endpoint maxes out at 100 records
+// per page and only allows ~50 requests/minute, and Netlify functions have a
+// hard wall-clock timeout, so pulling everything in a single invocation isn't
+// reliable once an account has more than a few hundred sent emails. The
+// dashboard calls this repeatedly with an increasing `cursor` and aggregates
+// client-side (identical code path to the built-in demo data), stitching
+// chunks together and updating the UI as each one arrives.
+//
+// Query params:
 //   ?days=30              -> how many days back to pull (default 30, max 365, or "all")
 //   ?from=YYYY-MM-DD&to=YYYY-MM-DD -> explicit custom date range (overrides ?days)
 //   ?campaign_ids=id1,id2 -> restrict to specific sequences (comma-separated Apollo campaign ids)
+//   ?cursor=1              -> Apollo page number to resume from (default 1)
 
 const BASE = "https://api.apollo.io/api/v1";
+const PAGES_PER_CALL = 6; // ~6 Apollo pages (up to 600 messages) per Netlify invocation, paced to stay under both rate and time limits
+const PER_PAGE = 100;
+const PACING_MS = 1200; // Apollo caps this endpoint at 50 requests/minute
 
 exports.handler = async (event) => {
   const apiKey = process.env.APOLLO_API_KEY;
@@ -33,6 +46,8 @@ exports.handler = async (event) => {
     .map((s) => s.trim())
     .filter(Boolean);
 
+  const startCursor = Math.max(1, parseInt(event.queryStringParameters?.cursor || "1", 10) || 1);
+
   let minDate = null, maxDate = null;
   if (hasCustomRange) {
     minDate = fromParam;
@@ -47,25 +62,23 @@ exports.handler = async (event) => {
   }
 
   try {
-    // 1. Pull sequence (campaign) names so we can label the per-campaign breakdown
-    //    and offer the full list of sequences to filter by, regardless of the
-    //    current campaign_ids filter.
+    // Sequence names — cheap, fetched every call so each chunk can label campaigns
+    // and the dashboard always has the full sequence list for its filter chips.
     const campaignNames = await fetchCampaignNames(apiKey);
-
-    // 2. Pull outreach emails (paginated), scoped to the date window (if any)
-    //    and, optionally, to specific sequences.
-    const messages = await fetchAllMessages(apiKey, minDate, maxDate, campaignIds);
-
-    // 3. Aggregate.
-    const stats = aggregate(messages, campaignNames);
     const availableCampaigns = Object.entries(campaignNames).map(([id, name]) => ({ id, name }));
+
+    const { messages, nextCursor, hasMore } = await fetchChunk(apiKey, minDate, maxDate, campaignIds, startCursor);
+    const normalized = messages.map((m) => normalizeMessage(m, campaignNames));
 
     return respond(200, {
       generatedAt: new Date().toISOString(),
       windowDays: hasCustomRange ? null : (isAllTime ? "all" : days),
       customRange: hasCustomRange ? { from: fromParam, to: toParam } : null,
       availableCampaigns,
-      ...stats,
+      messages: normalized,
+      cursor: startCursor,
+      nextCursor,
+      hasMore,
     });
   } catch (err) {
     return respond(502, { error: String(err && err.message ? err.message : err) });
@@ -86,16 +99,12 @@ async function fetchCampaignNames(apiKey) {
   return map;
 }
 
-async function fetchAllMessages(apiKey, minDate, maxDate, campaignIds) {
-  const perPage = 100;
-  const maxPages = 100; // safety cap: up to 10,000 messages (Apollo allows up to 500 pages/50,000 total)
-  const pacingMs = 1300; // stay under Apollo's 50 requests/minute limit on this endpoint
+async function fetchChunk(apiKey, minDate, maxDate, campaignIds, startCursor) {
   let all = [];
-  for (let page = 1; page <= maxPages; page++) {
-    const params = {
-      page,
-      per_page: perPage,
-    };
+  let page = startCursor;
+  let hasMore = true;
+  for (let i = 0; i < PAGES_PER_CALL; i++) {
+    const params = { page, per_page: PER_PAGE };
     if (minDate && maxDate) {
       params.emailer_message_date_range_mode = "completed_at";
       params["emailer_message_date_range[min]"] = minDate;
@@ -104,14 +113,14 @@ async function fetchAllMessages(apiKey, minDate, maxDate, campaignIds) {
     const res = await apolloFetch(apiKey, `${BASE}/emailer_messages/search`, params, campaignIds && campaignIds.length ? { "emailer_campaign_ids[]": campaignIds } : {});
     const batch = res.emailer_messages || res.emailer_message || res.messages || [];
     all = all.concat(batch);
-    // Stop once a page comes back with fewer than a full page of results — that's
-    // the last page. We deliberately don't trust a `total_pages`-style field here:
-    // Apollo's pagination metadata key isn't consistently documented, and trusting
-    // a missing/mis-keyed field caused this to stop after page 1 previously.
-    if (batch.length < perPage) break;
-    if (page < maxPages) await sleep(pacingMs);
+    page += 1;
+    if (batch.length < PER_PAGE) {
+      hasMore = false;
+      break;
+    }
+    if (i < PAGES_PER_CALL - 1) await sleep(PACING_MS);
   }
-  return all;
+  return { messages: all, nextCursor: page, hasMore };
 }
 
 function sleep(ms) {
@@ -132,10 +141,9 @@ async function apolloFetch(apiKey, url, params, arrayParams, attempt = 1) {
     method: "GET",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, accept: "application/json" },
   });
-  if (res.status === 429 && attempt <= 4) {
-    // Rate-limited — back off and retry a few times before giving up.
+  if (res.status === 429 && attempt <= 3) {
     const retryAfterHeader = parseFloat(res.headers.get("retry-after"));
-    const waitMs = !isNaN(retryAfterHeader) ? retryAfterHeader * 1000 : attempt * 4000;
+    const waitMs = !isNaN(retryAfterHeader) ? retryAfterHeader * 1000 : attempt * 3000;
     await sleep(waitMs);
     return apolloFetch(apiKey, url, params, arrayParams, attempt + 1);
   }
@@ -146,64 +154,19 @@ async function apolloFetch(apiKey, url, params, arrayParams, attempt = 1) {
   return res.json();
 }
 
-function aggregate(messages, campaignNames) {
-  let sent = 0, delivered = 0, opened = 0, replied = 0, bounced = 0, clicked = 0;
-  const byCampaign = {};
-  const byDay = {};
-  const list = [];
-
-  for (const m of messages) {
-    const status = (m.status || m.state || m.emailer_message_stat || "").toLowerCase();
-    const campaignId = m.emailer_campaign_id || m.campaign_id || (m.emailer_campaign && m.emailer_campaign.id) || "unassigned";
-    const campaignName = campaignNames[campaignId] || (m.emailer_campaign && m.emailer_campaign.name) || (campaignId === "unassigned" ? "No sequence" : campaignId);
-    const sentAt = m.completed_at || m.due_at || m.created_at || null;
-    const day = sentAt ? sentAt.slice(0, 10) : "unknown";
-
-    sent += 1;
-    if (["delivered", "opened", "not_opened", "clicked", "unsubscribed", "demoed"].includes(status) || status) delivered += 1;
-    if (["opened", "clicked", "unsubscribed", "demoed"].includes(status)) opened += 1;
-    if (status === "clicked") clicked += 1;
-    if (status === "bounced") bounced += 1;
-    if (m.reply_class || m.emailer_message_reply_class || m.replied) replied += 1;
-
-    if (!byCampaign[campaignId]) byCampaign[campaignId] = { id: campaignId, name: campaignName, sent: 0, opened: 0, replied: 0, bounced: 0 };
-    byCampaign[campaignId].sent += 1;
-    if (["opened", "clicked", "unsubscribed", "demoed"].includes(status)) byCampaign[campaignId].opened += 1;
-    if (m.reply_class || m.emailer_message_reply_class || m.replied) byCampaign[campaignId].replied += 1;
-    if (status === "bounced") byCampaign[campaignId].bounced += 1;
-
-    byDay[day] = (byDay[day] || 0) + 1;
-
-    list.push({
-      to: m.to_email || (m.to_emails && m.to_emails[0]) || m.contact_email || "—",
-      subject: m.subject || m.subject_line || "(no subject)",
-      status: status || "unknown",
-      campaign: campaignName,
-      sentAt,
-    });
-  }
-
-  list.sort((a, b) => (b.sentAt || "").localeCompare(a.sentAt || ""));
-
-  const timeline = Object.entries(byDay)
-    .filter(([d]) => d !== "unknown")
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, count]) => ({ date, count }));
-
+function normalizeMessage(m, campaignNames) {
+  const status = (m.status || m.state || m.emailer_message_stat || "").toLowerCase() || "unknown";
+  const campaignId = m.emailer_campaign_id || m.campaign_id || (m.emailer_campaign && m.emailer_campaign.id) || "unassigned";
+  const campaignName = campaignNames[campaignId] || (m.emailer_campaign && m.emailer_campaign.name) || (campaignId === "unassigned" ? "No sequence" : campaignId);
+  const sentAt = m.completed_at || m.due_at || m.created_at || null;
   return {
-    totals: {
-      sent,
-      delivered,
-      opened,
-      replied,
-      bounced,
-      openRate: sent ? opened / sent : 0,
-      replyRate: sent ? replied / sent : 0,
-      bounceRate: sent ? bounced / sent : 0,
-    },
-    campaigns: Object.values(byCampaign).sort((a, b) => b.sent - a.sent),
-    timeline,
-    emails: list.slice(0, 500),
+    to: m.to_email || (m.to_emails && m.to_emails[0]) || m.contact_email || "—",
+    subject: m.subject || m.subject_line || "(no subject)",
+    status,
+    campaignId,
+    campaignName,
+    sentAt,
+    replied: !!(m.reply_class || m.emailer_message_reply_class),
   };
 }
 
