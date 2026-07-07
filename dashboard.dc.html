@@ -67,8 +67,26 @@
         </div>
       </sc-if>
 
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 3px; background: rgba(255,255,255,0.6); border-radius: 999px; padding: 4px;">
+          <sc-for list="{{ dayOptions }}" as="opt" hint-placeholder-count="5">
+            <button type="button" onClick="{{ opt.select }}" style="font-family: inherit; font-size: 13px; font-weight: 600; border: none; border-radius: 999px; padding: 7px 14px; cursor: pointer; color: {{ opt.color }}; background: {{ opt.bg }}; transition: background .15s ease, color .15s ease;">{{ opt.label }}</button>
+          </sc-for>
+        </div>
+        <sc-if value="{{ hasCampaignChips }}">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end;">
+            <sc-for list="{{ campaignChips }}" as="chip" hint-placeholder-count="4">
+              <button type="button" onClick="{{ chip.toggle }}" style="font-family: inherit; font-size: 12.5px; font-weight: 600; border: none; border-radius: 999px; padding: 7px 14px; cursor: pointer; color: {{ chip.color }}; background: {{ chip.bg }}; transition: background .15s ease, color .15s ease; white-space: nowrap;">{{ chip.label }}</button>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+
       <div style="display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 20px;">
         <h1 style="font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0;">Last {{ windowDaysLabel }}</h1>
+        <sc-if value="{{ isRefreshing }}">
+          <span style="font-size: 12px; color: rgba(60,60,67,0.5);">Updating…</span>
+        </sc-if>
       </div>
 
       <!-- stat cards -->
@@ -186,12 +204,16 @@ function fmtDate(iso) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function buildDemoData() {
-  const campaigns = [
-    { id: "c1", name: "Growth Marketer Outreach", sent: 84, opened: 51, replied: 9, bounced: 2 },
-    { id: "c2", name: "Proof-Led Follow-up", sent: 62, opened: 33, replied: 6, bounced: 1 },
-    { id: "c3", name: "Warm Intro Sequence", sent: 37, opened: 22, replied: 8, bounced: 0 },
-  ];
+const DAY_CHOICES = [7, 14, 30, 60, 90, "all"];
+
+const DEMO_CAMPAIGNS_META = [
+  { id: "c1", name: "Growth Marketer Outreach" },
+  { id: "c2", name: "Proof-Led Follow-up" },
+  { id: "c3", name: "Warm Intro Sequence" },
+  { id: "c4", name: "Founder-to-Founder" },
+];
+
+function buildDemoPool() {
   const statuses = ["delivered", "opened", "clicked", "not_opened", "bounced", "unsubscribed"];
   const names = ["Jordan Lee", "Priya Shah", "Marcus Webb", "Ana Torres", "Diego Kim", "Sam Whitfield", "Rae Okafor", "Lena Voss"];
   const subjects = [
@@ -201,92 +223,143 @@ function buildDemoData() {
     "Following up — {{first_name}}",
     "3 things I noticed about {{company}}",
   ];
-  const emails = [];
-  const byDay = {};
+  const pool = [];
   const now = new Date();
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 260; i++) {
     const d = new Date(now);
-    d.setDate(d.getDate() - Math.floor(Math.random() * 30));
-    const dayKey = d.toISOString().slice(0, 10);
-    byDay[dayKey] = (byDay[dayKey] || 0) + 1;
-    const campaign = campaigns[i % campaigns.length];
-    emails.push({
+    d.setDate(d.getDate() - Math.floor(Math.random() * 120));
+    const campaign = DEMO_CAMPAIGNS_META[i % DEMO_CAMPAIGNS_META.length];
+    pool.push({
       to: `${names[i % names.length].toLowerCase().replace(" ", ".")}@example.com`,
       subject: subjects[i % subjects.length],
       status: statuses[Math.floor(Math.random() * statuses.length)],
-      campaign: campaign.name,
+      campaignId: campaign.id,
+      campaignName: campaign.name,
       sentAt: d.toISOString(),
     });
   }
-  emails.sort((a, b) => b.sentAt.localeCompare(a.sentAt));
-  const totals = campaigns.reduce(
-    (acc, c) => ({
-      sent: acc.sent + c.sent,
-      opened: acc.opened + c.opened,
-      replied: acc.replied + c.replied,
-      bounced: acc.bounced + c.bounced,
-    }),
-    { sent: 0, opened: 0, replied: 0, bounced: 0 }
-  );
-  totals.delivered = totals.sent - totals.bounced;
-  totals.openRate = totals.opened / totals.sent;
-  totals.replyRate = totals.replied / totals.sent;
-  totals.bounceRate = totals.bounced / totals.sent;
+  return pool;
+}
+
+function aggregateEmails(pool, availableCampaigns, days, campaignIdsFilter) {
+  const isAllTime = days === "all";
+  const cutoff = new Date();
+  if (!isAllTime) cutoff.setDate(cutoff.getDate() - days);
+  const filtered = pool.filter((e) => {
+    if (!isAllTime && new Date(e.sentAt) < cutoff) return false;
+    if (campaignIdsFilter && campaignIdsFilter.length && !campaignIdsFilter.includes(e.campaignId)) return false;
+    return true;
+  });
+
+  const byCampaign = {};
+  const byDay = {};
+  let opened = 0, replied = 0, bounced = 0;
+
+  for (const e of filtered) {
+    if (!byCampaign[e.campaignId]) byCampaign[e.campaignId] = { id: e.campaignId, name: e.campaignName, sent: 0, opened: 0, replied: 0, bounced: 0 };
+    byCampaign[e.campaignId].sent += 1;
+    const isOpened = ["opened", "clicked", "unsubscribed"].includes(e.status);
+    const isBounced = e.status === "bounced";
+    const isReplied = e.status === "clicked"; // demo proxy for reply signal
+    if (isOpened) { opened += 1; byCampaign[e.campaignId].opened += 1; }
+    if (isBounced) { bounced += 1; byCampaign[e.campaignId].bounced += 1; }
+    if (isReplied) { replied += 1; byCampaign[e.campaignId].replied += 1; }
+    const day = e.sentAt.slice(0, 10);
+    byDay[day] = (byDay[day] || 0) + 1;
+  }
+
+  const sent = filtered.length;
   const timeline = Object.entries(byDay)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, count]) => ({ date, count }));
+
+  const emails = [...filtered].sort((a, b) => b.sentAt.localeCompare(a.sentAt)).slice(0, 500).map((e) => ({
+    to: e.to,
+    subject: e.subject,
+    status: e.status,
+    campaign: e.campaignName,
+    sentAt: e.sentAt,
+  }));
+
   return {
     generatedAt: new Date().toISOString(),
-    windowDays: 30,
-    totals,
-    campaigns,
+    windowDays: days,
+    availableCampaigns,
+    totals: {
+      sent,
+      delivered: sent - bounced,
+      opened,
+      replied,
+      bounced,
+      openRate: sent ? opened / sent : 0,
+      replyRate: sent ? replied / sent : 0,
+      bounceRate: sent ? bounced / sent : 0,
+    },
+    campaigns: Object.values(byCampaign).sort((a, b) => b.sent - a.sent),
     timeline,
     emails,
   };
 }
 
 class Component extends DCLogic {
-  state = { loading: true, error: null, data: null, demo: false };
+  state = { loading: true, refreshing: false, error: null, data: null, demo: false, days: 30, selectedCampaignIds: [] };
 
   componentDidMount() {
-    this.load();
+    this.load(30, []);
   }
 
-  async load() {
-    this.setState({ loading: true, error: null });
+  selectDays = (d) => this.load(d, this.state.selectedCampaignIds);
+
+  toggleCampaign = (id) => {
+    const cur = this.state.selectedCampaignIds || [];
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    this.load(this.state.days, next);
+  };
+
+  clearCampaigns = () => this.load(this.state.days, []);
+
+  async load(days, campaignIds) {
+    const isInitial = !this.state.data;
+    this.setState({ loading: isInitial, refreshing: !isInitial, error: null });
     try {
-      const res = await fetch("/.netlify/functions/apollo-stats?days=30");
+      const qs = new URLSearchParams({ days: String(days) });
+      if (campaignIds && campaignIds.length) qs.set("campaign_ids", campaignIds.join(","));
+      const res = await fetch(`/.netlify/functions/apollo-stats?${qs.toString()}`);
       const contentType = res.headers.get("content-type") || "";
       if (!contentType.includes("application/json")) {
-        // Function isn't deployed/reachable here — fall back to demo data.
-        this.setState({ loading: false, error: null, data: buildDemoData(), demo: true });
+        this.applyDemo(days, campaignIds);
         return;
       }
       const json = await res.json();
       if (!res.ok || json.error) {
-        // Function is deployed and responded, but with a real error (bad key, etc) — surface it.
-        this.setState({ loading: false, error: json.error || `Request failed (${res.status})`, data: null, demo: false });
+        this.setState({ loading: false, refreshing: false, error: json.error || `Request failed (${res.status})`, data: null, demo: false });
         return;
       }
-      this.setState({ loading: false, error: null, data: json, demo: false });
+      this.setState({ loading: false, refreshing: false, error: null, data: json, demo: false, days, selectedCampaignIds: campaignIds });
     } catch (e) {
-      // Network-level failure (e.g. sandbox preview with no functions runtime) — show demo data.
-      this.setState({ loading: false, error: null, data: buildDemoData(), demo: true });
+      this.applyDemo(days, campaignIds);
     }
   }
 
+  applyDemo(days, campaignIds) {
+    if (!this._demoPool) this._demoPool = buildDemoPool();
+    const data = aggregateEmails(this._demoPool, DEMO_CAMPAIGNS_META, days, campaignIds);
+    this.setState({ loading: false, refreshing: false, error: null, data, demo: true, days, selectedCampaignIds: campaignIds });
+  }
+
   renderVals() {
-    const { loading, error, data, demo } = this.state;
-    const refresh = () => this.load();
+    const { loading, error, data, demo, refreshing, days, selectedCampaignIds } = this.state;
+    const refresh = () => this.load(days, selectedCampaignIds);
 
     if (loading) {
-      return { isLoading: true, hasError: false, hasData: false, refresh };
+      return { isLoading: true, hasError: false, hasData: false, lastUpdatedLabel: "", refresh };
     }
     if (error || !data) {
       return {
         isLoading: false,
         hasError: true,
         hasData: false,
+        lastUpdatedLabel: "",
         errorMessage: error || "No data returned.",
         refresh,
       };
@@ -332,13 +405,39 @@ class Component extends DCLogic {
       };
     });
 
+    const dayOptions = DAY_CHOICES.map((d) => {
+      const active = d === days;
+      return {
+        label: d === "all" ? "All time" : `${d}d`,
+        select: () => this.selectDays(d),
+        color: active ? "#ffffff" : "#1d1d1f",
+        bg: active ? "#0071e3" : "transparent",
+      };
+    });
+
+    const availableCampaigns = data.availableCampaigns || [];
+    const chipDefs = [{ id: null, label: "All sequences" }, ...availableCampaigns.map((c) => ({ id: c.id, label: c.name }))];
+    const campaignChips = chipDefs.map((c) => {
+      const active = c.id === null ? selectedCampaignIds.length === 0 : selectedCampaignIds.includes(c.id);
+      return {
+        label: c.label,
+        toggle: () => (c.id === null ? this.clearCampaigns() : this.toggleCampaign(c.id)),
+        color: active ? "#ffffff" : "#1d1d1f",
+        bg: active ? "#af52de" : "rgba(0,0,0,0.05)",
+      };
+    });
+
     return {
       isLoading: false,
       hasError: false,
       hasData: true,
       isDemo: !!demo,
+      isRefreshing: !!refreshing,
       lastUpdatedLabel: `Updated ${new Date(data.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
-      windowDaysLabel: `${data.windowDays || 30} days`,
+      windowDaysLabel: data.windowDays === "all" ? "all time" : `${data.windowDays || 30} days`,
+      dayOptions,
+      hasCampaignChips: campaignChips.length > 1,
+      campaignChips,
       statCards,
       hasTimeline: timelineBars.length > 0,
       timelineBars,
