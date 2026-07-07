@@ -8,7 +8,8 @@
 //   3. Redeploy. The dashboard calls GET /.netlify/functions/apollo-stats.
 //
 // Optional query params on the function itself:
-//   ?days=30   -> how many days back to pull (default 30, max 180)
+//   ?days=30              -> how many days back to pull (default 30, max 180)
+//   ?campaign_ids=id1,id2 -> restrict to specific sequences (comma-separated Apollo campaign ids)
 
 const BASE = "https://api.apollo.io/api/v1";
 
@@ -18,23 +19,38 @@ exports.handler = async (event) => {
     return respond(500, { error: "APOLLO_API_KEY is not set in Netlify environment variables." });
   }
 
-  const days = Math.min(parseInt(event.queryStringParameters?.days || "30", 10) || 30, 180);
+  const daysParam = event.queryStringParameters?.days || "30";
+  const isAllTime = daysParam === "all";
+  const days = isAllTime ? null : Math.min(parseInt(daysParam, 10) || 30, 365);
+  const campaignIds = (event.queryStringParameters?.campaign_ids || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const maxDate = new Date();
   const minDate = new Date();
-  minDate.setDate(minDate.getDate() - days);
+  if (!isAllTime) minDate.setDate(minDate.getDate() - days);
   const fmt = (d) => d.toISOString().slice(0, 10);
 
   try {
-    // 1. Pull sequence (campaign) names so we can label the per-campaign breakdown.
+    // 1. Pull sequence (campaign) names so we can label the per-campaign breakdown
+    //    and offer the full list of sequences to filter by, regardless of the
+    //    current campaign_ids filter.
     const campaignNames = await fetchCampaignNames(apiKey);
 
-    // 2. Pull outreach emails (paginated), scoped to the date window.
-    const messages = await fetchAllMessages(apiKey, fmt(minDate), fmt(maxDate));
+    // 2. Pull outreach emails (paginated), scoped to the date window (if any)
+    //    and, optionally, to specific sequences.
+    const messages = await fetchAllMessages(apiKey, isAllTime ? null : fmt(minDate), isAllTime ? null : fmt(maxDate), campaignIds);
 
     // 3. Aggregate.
     const stats = aggregate(messages, campaignNames);
+    const availableCampaigns = Object.entries(campaignNames).map(([id, name]) => ({ id, name }));
 
-    return respond(200, { generatedAt: new Date().toISOString(), windowDays: days, ...stats });
+    return respond(200, {
+      generatedAt: new Date().toISOString(),
+      windowDays: isAllTime ? "all" : days,
+      availableCampaigns,
+      ...stats,
+    });
   } catch (err) {
     return respond(502, { error: String(err && err.message ? err.message : err) });
   }
@@ -54,18 +70,21 @@ async function fetchCampaignNames(apiKey) {
   return map;
 }
 
-async function fetchAllMessages(apiKey, minDate, maxDate) {
+async function fetchAllMessages(apiKey, minDate, maxDate, campaignIds) {
   const perPage = 100;
   const maxPages = 20; // safety cap: up to 2,000 messages
   let all = [];
   for (let page = 1; page <= maxPages; page++) {
-    const res = await apolloFetch(apiKey, `${BASE}/emailer_messages/search`, {
+    const params = {
       page,
       per_page: perPage,
-      emailer_message_date_range_mode: "completed_at",
-      "emailer_message_date_range[min]": minDate,
-      "emailer_message_date_range[max]": maxDate,
-    });
+    };
+    if (minDate && maxDate) {
+      params.emailer_message_date_range_mode = "completed_at";
+      params["emailer_message_date_range[min]"] = minDate;
+      params["emailer_message_date_range[max]"] = maxDate;
+    }
+    const res = await apolloFetch(apiKey, `${BASE}/emailer_messages/search`, params, campaignIds && campaignIds.length ? { "emailer_campaign_ids[]": campaignIds } : {});
     const batch = res.emailer_messages || res.emailer_message || res.messages || [];
     all = all.concat(batch);
     const totalPages = res.pagination?.total_pages || res.total_pages || 1;
@@ -74,11 +93,16 @@ async function fetchAllMessages(apiKey, minDate, maxDate) {
   return all;
 }
 
-async function apolloFetch(apiKey, url, params) {
+async function apolloFetch(apiKey, url, params, arrayParams) {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
     if (v !== undefined && v !== null && v !== "") qs.set(k, v);
   });
+  if (arrayParams) {
+    Object.entries(arrayParams).forEach(([k, arr]) => {
+      (arr || []).forEach((v) => qs.append(k, v));
+    });
+  }
   const res = await fetch(`${url}?${qs.toString()}`, {
     method: "GET",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, accept: "application/json" },
