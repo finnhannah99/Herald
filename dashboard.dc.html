@@ -171,6 +171,11 @@
     <!-- ==================== individual emails (own filters, independent of the controls above) ==================== -->
     <div style="background: rgba(255,255,255,0.72); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border-radius: 18px; padding: 24px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 16px 32px -22px rgba(0,0,0,0.18); margin-top: 32px;">
       <div style="font-size: 15px; font-weight: 700; margin-bottom: 16px;">Sent emails ({{ emailCountLabel }})</div>
+      <sc-if value="{{ hasEmailsError }}">
+        <div style="display: flex; align-items: center; gap: 8px; background: rgba(255,59,48,0.08); border: 1px solid rgba(255,59,48,0.2); color: #b3261e; font-size: 12.5px; font-weight: 600; border-radius: 10px; padding: 9px 14px; margin-bottom: 14px;">
+          <span>⚠︎</span><span>Couldn't load sent emails from Apollo: {{ emailsErrorMessage }}</span>
+        </div>
+      </sc-if>
       <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px;">
         <input type="text" placeholder="Search recipient…" value="{{ emailQuery }}" onChange="{{ onQueryChange }}" style="font-family: inherit; font-size: 13px; padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.08); background: #fff; min-width: 180px; flex: 1 1 180px;">
         <select onChange="{{ onSubjectChange }}" style="font-family: inherit; font-size: 13px; padding: 8px 12px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.08); background: #fff; max-width: 220px;">
@@ -202,7 +207,7 @@
           </thead>
           <tbody>
             <sc-if value="{{ emailsReady }}" hint-placeholder-val="{{ false }}">
-              <sc-for list="{{ emailRows }}" as="row" hint-placeholder-count="8">
+              <sc-for list="{{ emailRows }}" as="row">
                 <tr style="border-top: 1px solid rgba(0,0,0,0.05);">
                   <td style="padding: 10px 12px; color: #1d1d1f;">{{ row.to }}</td>
                   <td style="padding: 10px 12px; color: rgba(60,60,67,0.8); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ row.subject }}</td>
@@ -295,6 +300,7 @@ function buildDemoPool() {
       campaignId: campaign.id,
       campaignName: campaign.name,
       sentAt: d.toISOString(),
+      replied: Math.random() < 0.15,
     });
   }
   return pool;
@@ -328,7 +334,7 @@ function aggregateEmails(pool, availableCampaigns, days, campaignIdsFilter) {
     byCampaign[e.campaignId].sent += 1;
     const isOpened = ["opened", "clicked", "unsubscribed"].includes(e.status);
     const isBounced = e.status === "bounced";
-    const isReplied = e.status === "clicked"; // demo proxy for reply signal
+    const isReplied = !!e.replied;
     if (isOpened) { opened += 1; byCampaign[e.campaignId].opened += 1; }
     if (isBounced) { bounced += 1; byCampaign[e.campaignId].bounced += 1; }
     if (isReplied) { replied += 1; byCampaign[e.campaignId].replied += 1; }
@@ -373,7 +379,7 @@ function aggregateEmails(pool, availableCampaigns, days, campaignIdsFilter) {
 class Component extends DCLogic {
   state = {
     loading: true, refreshing: false, error: null, data: null, demo: false, days: 30, selectedCampaignIds: [],
-    emailsAll: null, emailsLoading: true,
+    emailsAll: null, emailsLoading: true, emailsDemo: false, emailsError: null, emailsFetchingMore: false,
     emailQuery: "", emailSubject: "", emailSequence: "", emailStatus: "",
     customPanelOpen: false, customFromDraft: "", customToDraft: "",
   };
@@ -383,30 +389,92 @@ class Component extends DCLogic {
     this.loadAllEmails();
   }
 
-  async loadAllEmails() {
-    this.setState({ emailsLoading: true });
-    try {
-      const res = await fetch(`/.netlify/functions/apollo-stats?days=all`);
+  // Pulls every page for a given range/sequence filter by repeatedly calling the
+  // function with an advancing cursor (each call is one bounded, rate-limit-safe
+  // chunk server-side). Calls onProgress after every chunk so callers can update
+  // the UI as data streams in, instead of blocking on the entire pull.
+  async fetchPool(daysSpec, campaignIds, onProgress) {
+    let pool = [];
+    let availableCampaigns = [];
+    let cursor = 1;
+    let hasMore = true;
+    let chunkIndex = 0;
+    const maxChunks = 40; // safety cap: ~40 chunks * ~600 msgs = up to 24,000 messages
+    while (hasMore && chunkIndex < maxChunks) {
+      chunkIndex += 1;
+      const qs = new URLSearchParams();
+      if (daysSpec && typeof daysSpec === "object" && daysSpec.from && daysSpec.to) {
+        qs.set("from", daysSpec.from);
+        qs.set("to", daysSpec.to);
+      } else {
+        qs.set("days", String(daysSpec));
+      }
+      if (campaignIds && campaignIds.length) qs.set("campaign_ids", campaignIds.join(","));
+      qs.set("cursor", String(cursor));
+
+      let res;
+      try {
+        res = await fetch(`/.netlify/functions/apollo-stats?${qs.toString()}`);
+      } catch (networkErr) {
+        if (chunkIndex === 1) {
+          const e = new Error("unreachable");
+          e.unreachable = true;
+          throw e;
+        }
+        break; // keep whatever we already gathered
+      }
+
       const contentType = res.headers.get("content-type") || "";
       if (!contentType.includes("application/json")) {
-        this.applyDemoEmails();
-        return;
+        if (chunkIndex === 1) {
+          const e = new Error("unreachable");
+          e.unreachable = true;
+          throw e;
+        }
+        break;
       }
+
       const json = await res.json();
       if (!res.ok || json.error) {
+        if (chunkIndex === 1) throw new Error(json.error || `Request failed (${res.status})`);
+        break; // deployed and reachable, but a later chunk failed — keep the real data collected so far
+      }
+
+      pool = pool.concat(json.messages || []);
+      if (json.availableCampaigns && json.availableCampaigns.length) availableCampaigns = json.availableCampaigns;
+      hasMore = !!json.hasMore;
+      cursor = json.nextCursor || cursor + 1;
+      if (onProgress) onProgress({ pool, availableCampaigns, done: !hasMore });
+    }
+    return { pool, availableCampaigns };
+  }
+
+  async loadAllEmails() {
+    this.setState({ emailsLoading: true, emailsError: null });
+    const runId = (this._emailsRunId = (this._emailsRunId || 0) + 1);
+    try {
+      const { pool, availableCampaigns } = await this.fetchPool("all", [], ({ pool, availableCampaigns, done }) => {
+        if (this._emailsRunId !== runId) return;
+        const data = aggregateEmails(pool, availableCampaigns, "all", []);
+        this.setState({ emailsLoading: false, emailsAll: data, emailsDemo: false, emailsFetchingMore: !done });
+      });
+      if (this._emailsRunId !== runId) return;
+      const data = aggregateEmails(pool, availableCampaigns, "all", []);
+      this.setState({ emailsLoading: false, emailsAll: data, emailsDemo: false, emailsFetchingMore: false });
+    } catch (e) {
+      if (this._emailsRunId !== runId) return;
+      if (e.unreachable) {
         this.applyDemoEmails();
         return;
       }
-      this.setState({ emailsLoading: false, emailsAll: json });
-    } catch (e) {
-      this.applyDemoEmails();
+      this.setState({ emailsLoading: false, emailsFetchingMore: false, emailsError: e.message || String(e) });
     }
   }
 
   applyDemoEmails() {
     if (!this._demoPool) this._demoPool = buildDemoPool();
     const data = aggregateEmails(this._demoPool, DEMO_CAMPAIGNS_META, "all", []);
-    this.setState({ emailsLoading: false, emailsAll: data });
+    this.setState({ emailsLoading: false, emailsFetchingMore: false, emailsAll: data, emailsDemo: true, emailsError: null });
   }
 
   setEmailQuery = (v) => this.setState({ emailQuery: v });
@@ -448,29 +516,23 @@ class Component extends DCLogic {
   async load(days, campaignIds) {
     const isInitial = !this.state.data;
     this.setState({ loading: isInitial, refreshing: !isInitial, error: null });
+    const runId = (this._loadRunId = (this._loadRunId || 0) + 1);
     try {
-      const qs = new URLSearchParams();
-      if (days && typeof days === "object" && days.from && days.to) {
-        qs.set("from", days.from);
-        qs.set("to", days.to);
-      } else {
-        qs.set("days", String(days));
-      }
-      if (campaignIds && campaignIds.length) qs.set("campaign_ids", campaignIds.join(","));
-      const res = await fetch(`/.netlify/functions/apollo-stats?${qs.toString()}`);
-      const contentType = res.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
+      const { pool, availableCampaigns } = await this.fetchPool(days, campaignIds, ({ pool, availableCampaigns }) => {
+        if (this._loadRunId !== runId) return;
+        const data = aggregateEmails(pool, availableCampaigns, days, campaignIds);
+        this.setState({ loading: false, refreshing: true, error: null, data, demo: false, days, selectedCampaignIds: campaignIds });
+      });
+      if (this._loadRunId !== runId) return;
+      const data = aggregateEmails(pool, availableCampaigns, days, campaignIds);
+      this.setState({ loading: false, refreshing: false, error: null, data, demo: false, days, selectedCampaignIds: campaignIds });
+    } catch (e) {
+      if (this._loadRunId !== runId) return;
+      if (e.unreachable) {
         this.applyDemo(days, campaignIds);
         return;
       }
-      const json = await res.json();
-      if (!res.ok || json.error) {
-        this.setState({ loading: false, refreshing: false, error: json.error || `Request failed (${res.status})`, data: null, demo: false });
-        return;
-      }
-      this.setState({ loading: false, refreshing: false, error: null, data: json, demo: false, days, selectedCampaignIds: campaignIds });
-    } catch (e) {
-      this.applyDemo(days, campaignIds);
+      this.setState({ loading: false, refreshing: false, error: e.message || String(e), data: null, demo: false });
     }
   }
 
@@ -481,7 +543,7 @@ class Component extends DCLogic {
   }
 
   renderVals() {
-    const { loading, error, data, demo, refreshing, days, selectedCampaignIds, emailsAll, emailsLoading, emailQuery, emailSubject, emailSequence, emailStatus, customPanelOpen, customFromDraft, customToDraft } = this.state;
+    const { loading, error, data, demo, refreshing, days, selectedCampaignIds, emailsAll, emailsLoading, emailsDemo, emailsError, emailsFetchingMore, emailQuery, emailSubject, emailSequence, emailStatus, customPanelOpen, customFromDraft, customToDraft } = this.state;
     const refresh = () => this.load(days, selectedCampaignIds);
 
     // ---- Sent-emails table: independent of the top day/sequence controls ----
@@ -519,11 +581,14 @@ class Component extends DCLogic {
     const onStatusChange = (e) => this.setEmailStatus(e.target.value);
 
     const emailsReady = !emailsLoading;
-    const showUpdatingToast = !!refreshing || (!!emailsLoading && !loading);
+    const showUpdatingToast = !!refreshing || (!!emailsLoading && !loading) || !!emailsFetchingMore;
+    const hasEmailsError = !!emailsError && !emailsDemo && emailRows.length === 0;
     const emailsSectionVals = {
       showUpdatingToast,
       hasEmails: emailRows.length > 0,
-      noEmails: emailsReady && emailRows.length === 0,
+      noEmails: emailsReady && emailRows.length === 0 && !hasEmailsError,
+      hasEmailsError,
+      emailsErrorMessage: emailsError || "",
       emailCountLabel,
       emailRows,
       emailQuery,
@@ -536,6 +601,7 @@ class Component extends DCLogic {
       onStatusChange,
       emailsLoading: !!emailsLoading,
       emailsReady,
+      anyDemo: !!demo || !!emailsDemo,
     };
 
     if (loading) {
@@ -611,7 +677,7 @@ class Component extends DCLogic {
       isLoading: false,
       hasError: false,
       hasData: true,
-      isDemo: !!demo,
+      isDemo: !!demo || !!emailsDemo,
       isRefreshing: !!refreshing,
       lastUpdatedLabel: `Updated ${new Date(data.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
       windowDaysLabel: isCustom ? `${fmtShortDate(data.customRange.from)} – ${fmtShortDate(data.customRange.to)}` : (data.windowDays === "all" ? "all time" : `${data.windowDays || 30} days`),
