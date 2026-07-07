@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<template id="__bundler_thumbnail" data-bg-color="#1d1d1f">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1200" height="800" fill="#1d1d1f"/>
+    <text x="600" y="420" font-family="sans-serif" font-size="120" fill="#ffffff" text-anchor="middle" font-weight="700">H</text>
+  </svg>
+</template>
+<helmet>
+<style>
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; font-optical-sizing: auto; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</helmet>
+
+<div style="min-height: 100vh; background: linear-gradient(180deg, #f5f5f7 0%, #eef0f3 100%); color: #1d1d1f; font-family: -apple-system, 'SF Pro Text', system-ui, sans-serif;">
+
+  <!-- ==================== nav bar ==================== -->
+  <div style="position: sticky; top: 0; z-index: 40; background: rgba(255,255,255,0.7); backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%); box-shadow: 0 1px 0 rgba(0,0,0,0.06);">
+    <div style="max-width: 1080px; margin: 0 auto; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
+      <div style="display: flex; align-items: baseline; gap: 12px;">
+        <span style="font-family: -apple-system, 'SF Pro Display', system-ui, sans-serif; font-size: 28px; font-weight: 700; letter-spacing: -0.015em; background: linear-gradient(135deg, #0071e3, #af52de); -webkit-background-clip: text; background-clip: text; color: transparent;">Herald</span>
+        <span style="font-size: 13px; color: rgba(60,60,67,0.55);">Outreach report</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 14px;">
+        <span style="font-size: 12px; color: rgba(60,60,67,0.5);">{{ lastUpdatedLabel }}</span>
+        <button type="button" onClick="{{ refresh }}" style="font-family: inherit; font-size: 13px; font-weight: 600; color: #0071e3; background: rgba(0,113,227,0.08); border: none; border-radius: 999px; padding: 8px 16px; cursor: pointer;">↻ Refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="max-width: 1080px; margin: 0 auto; padding: 36px 24px 96px;">
+
+    <!-- ==================== loading state ==================== -->
+    <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ true }}">
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 140px 0;">
+        <div style="width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(0,113,227,0.15); border-top-color: #0071e3; animation: spin 0.9s linear infinite;"></div>
+        <span style="font-size: 14px; color: rgba(60,60,67,0.55);">Pulling live data from Apollo…</span>
+      </div>
+    </sc-if>
+
+    <!-- ==================== error state ==================== -->
+    <sc-if value="{{ hasError }}">
+      <div style="max-width: 560px; margin: 100px auto; text-align: center; background: rgba(255,255,255,0.7); border-radius: 20px; padding: 40px 32px; box-shadow: 0 20px 40px -24px rgba(0,0,0,0.15);">
+        <div style="font-size: 34px; margin-bottom: 12px;">⚠︎</div>
+        <h2 style="font-size: 20px; font-weight: 700; margin: 0 0 8px;">Couldn't load Apollo data</h2>
+        <p style="font-size: 14px; line-height: 1.6; color: rgba(60,60,67,0.7); margin: 0 0 20px;">{{ errorMessage }}</p>
+        <button type="button" onClick="{{ refresh }}" style="font-family: inherit; font-size: 14px; font-weight: 600; color: #fff; background: #0071e3; border: none; border-radius: 999px; padding: 10px 22px; cursor: pointer;">Try again</button>
+      </div>
+    </sc-if>
+
+    <!-- ==================== data state ==================== -->
+    <sc-if value="{{ hasData }}">
+
+      <sc-if value="{{ isDemo }}">
+        <div style="display: flex; align-items: center; gap: 10px; background: rgba(255,149,0,0.12); border: 1px solid rgba(255,149,0,0.25); color: #b25f00; font-size: 13px; font-weight: 600; border-radius: 12px; padding: 10px 16px; margin-bottom: 20px;">
+          <span>◐</span><span>Showing demo data — connect the Apollo API key on Netlify to go live.</span>
+        </div>
+      </sc-if>
+
+      <div style="display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 20px;">
+        <h1 style="font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0;">Last {{ windowDaysLabel }}</h1>
+      </div>
+
+      <!-- stat cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 32px;">
+        <sc-for list="{{ statCards }}" as="card" hint-placeholder-count="5">
+          <div style="background: rgba(255,255,255,0.72); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border-radius: 16px; padding: 20px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 16px 32px -22px rgba(0,0,0,0.18); animation: rise 0.4s ease both;">
+            <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: rgba(60,60,67,0.5); margin-bottom: 8px;">{{ card.label }}</div>
+            <div style="font-size: 30px; font-weight: 700; letter-spacing: -0.02em; color: {{ card.color }};">{{ card.value }}</div>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- timeline -->
+      <div style="background: rgba(255,255,255,0.72); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border-radius: 18px; padding: 24px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 16px 32px -22px rgba(0,0,0,0.18); margin-bottom: 32px;">
+        <div style="font-size: 15px; font-weight: 700; margin-bottom: 18px;">Sends per day</div>
+        <sc-if value="{{ hasTimeline }}" hint-placeholder-val="{{ true }}">
+          <div style="display: flex; align-items: flex-end; gap: 3px; height: 140px;">
+            <sc-for list="{{ timelineBars }}" as="bar" hint-placeholder-count="30">
+              <div title="{{ bar.title }}" style="flex: 1; min-width: 3px; height: {{ bar.height }}; background: linear-gradient(180deg, #0071e3, #af52de); border-radius: 3px 3px 0 0; opacity: {{ bar.opacity }};"></div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ hasTimeline }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size: 13px; color: rgba(60,60,67,0.5); padding: 20px 0;">No dated sends in this window yet.</div>
+        </sc-if>
+      </div>
+
+      <!-- per-campaign breakdown -->
+      <div style="background: rgba(255,255,255,0.72); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border-radius: 18px; padding: 24px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 16px 32px -22px rgba(0,0,0,0.18); margin-bottom: 32px;">
+        <div style="font-size: 15px; font-weight: 700; margin-bottom: 18px;">By sequence</div>
+        <sc-if value="{{ hasCampaigns }}" hint-placeholder-val="{{ true }}">
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <sc-for list="{{ campaignRows }}" as="row" hint-placeholder-count="3">
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; gap: 12px;">
+                  <span style="font-size: 14px; font-weight: 600;">{{ row.name }}</span>
+                  <span style="font-size: 12px; color: rgba(60,60,67,0.5); white-space: nowrap;">{{ row.summary }}</span>
+                </div>
+                <div style="height: 8px; border-radius: 999px; background: rgba(0,0,0,0.06); overflow: hidden; display: flex;">
+                  <div style="width: {{ row.openPct }}; background: #0071e3;"></div>
+                  <div style="width: {{ row.replyPct }}; background: #34c759;"></div>
+                  <div style="width: {{ row.bouncePct }}; background: #ff3b30;"></div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ hasCampaigns }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size: 13px; color: rgba(60,60,67,0.5);">No sequences found in this window.</div>
+        </sc-if>
+      </div>
+
+      <!-- individual emails -->
+      <div style="background: rgba(255,255,255,0.72); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border-radius: 18px; padding: 24px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 16px 32px -22px rgba(0,0,0,0.18);">
+        <div style="font-size: 15px; font-weight: 700; margin-bottom: 18px;">Sent emails ({{ emailCountLabel }})</div>
+        <div style="max-height: 480px; overflow-y: auto; border-radius: 12px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+              <tr style="position: sticky; top: 0; background: rgba(255,255,255,0.95); text-align: left;">
+                <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Recipient</th>
+                <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Subject</th>
+                <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Sequence</th>
+                <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Status</th>
+                <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Sent</th>
+              </tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{ emailRows }}" as="row" hint-placeholder-count="8">
+                <tr style="border-top: 1px solid rgba(0,0,0,0.05);">
+                  <td style="padding: 10px 12px; color: #1d1d1f;">{{ row.to }}</td>
+                  <td style="padding: 10px 12px; color: rgba(60,60,67,0.8); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ row.subject }}</td>
+                  <td style="padding: 10px 12px; color: rgba(60,60,67,0.6);">{{ row.campaign }}</td>
+                  <td style="padding: 10px 12px;"><span style="font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; color: {{ row.statusColor }}; background: {{ row.statusBg }};">{{ row.status }}</span></td>
+                  <td style="padding: 10px 12px; color: rgba(60,60,67,0.5); white-space: nowrap;">{{ row.sentAt }}</td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+          <sc-if value="{{ hasEmails }}" hint-placeholder-val="{{ true }}">
+            <div></div>
+          </sc-if>
+          <sc-if value="{{ hasEmails }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size: 13px; color: rgba(60,60,67,0.5); padding: 16px 12px;">No individual emails in this window.</div>
+          </sc-if>
+        </div>
+      </div>
+
+    </sc-if>
+
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const STATUS_COLORS = {
+  delivered: { color: "#0071e3", bg: "rgba(0,113,227,0.1)" },
+  opened: { color: "#af52de", bg: "rgba(175,82,222,0.12)" },
+  clicked: { color: "#af52de", bg: "rgba(175,82,222,0.12)" },
+  not_opened: { color: "rgba(60,60,67,0.6)", bg: "rgba(0,0,0,0.05)" },
+  bounced: { color: "#ff3b30", bg: "rgba(255,59,48,0.1)" },
+  spam_blocked: { color: "#ff3b30", bg: "rgba(255,59,48,0.1)" },
+  unsubscribed: { color: "#ff9500", bg: "rgba(255,149,0,0.12)" },
+  scheduled: { color: "rgba(60,60,67,0.6)", bg: "rgba(0,0,0,0.05)" },
+  drafted: { color: "rgba(60,60,67,0.6)", bg: "rgba(0,0,0,0.05)" },
+};
+
+function pct(n) {
+  return `${Math.round((n || 0) * 100)}%`;
+}
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d)) return "—";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function buildDemoData() {
+  const campaigns = [
+    { id: "c1", name: "Growth Marketer Outreach", sent: 84, opened: 51, replied: 9, bounced: 2 },
+    { id: "c2", name: "Proof-Led Follow-up", sent: 62, opened: 33, replied: 6, bounced: 1 },
+    { id: "c3", name: "Warm Intro Sequence", sent: 37, opened: 22, replied: 8, bounced: 0 },
+  ];
+  const statuses = ["delivered", "opened", "clicked", "not_opened", "bounced", "unsubscribed"];
+  const names = ["Jordan Lee", "Priya Shah", "Marcus Webb", "Ana Torres", "Diego Kim", "Sam Whitfield", "Rae Okafor", "Lena Voss"];
+  const subjects = [
+    "A growth marketer for {{company}}",
+    "What I'd bring to {{company}}",
+    "Quick question about {{company}}'s roadmap",
+    "Following up — {{first_name}}",
+    "3 things I noticed about {{company}}",
+  ];
+  const emails = [];
+  const byDay = {};
+  const now = new Date();
+  for (let i = 0; i < 90; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - Math.floor(Math.random() * 30));
+    const dayKey = d.toISOString().slice(0, 10);
+    byDay[dayKey] = (byDay[dayKey] || 0) + 1;
+    const campaign = campaigns[i % campaigns.length];
+    emails.push({
+      to: `${names[i % names.length].toLowerCase().replace(" ", ".")}@example.com`,
+      subject: subjects[i % subjects.length],
+      status: statuses[Math.floor(Math.random() * statuses.length)],
+      campaign: campaign.name,
+      sentAt: d.toISOString(),
+    });
+  }
+  emails.sort((a, b) => b.sentAt.localeCompare(a.sentAt));
+  const totals = campaigns.reduce(
+    (acc, c) => ({
+      sent: acc.sent + c.sent,
+      opened: acc.opened + c.opened,
+      replied: acc.replied + c.replied,
+      bounced: acc.bounced + c.bounced,
+    }),
+    { sent: 0, opened: 0, replied: 0, bounced: 0 }
+  );
+  totals.delivered = totals.sent - totals.bounced;
+  totals.openRate = totals.opened / totals.sent;
+  totals.replyRate = totals.replied / totals.sent;
+  totals.bounceRate = totals.bounced / totals.sent;
+  const timeline = Object.entries(byDay)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, count]) => ({ date, count }));
+  return {
+    generatedAt: new Date().toISOString(),
+    windowDays: 30,
+    totals,
+    campaigns,
+    timeline,
+    emails,
+  };
+}
+
+class Component extends DCLogic {
+  state = { loading: true, error: null, data: null, demo: false };
+
+  componentDidMount() {
+    this.load();
+  }
+
+  async load() {
+    this.setState({ loading: true, error: null });
+    try {
+      const res = await fetch("/.netlify/functions/apollo-stats?days=30");
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        // Function isn't deployed/reachable here — fall back to demo data.
+        this.setState({ loading: false, error: null, data: buildDemoData(), demo: true });
+        return;
+      }
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        // Function is deployed and responded, but with a real error (bad key, etc) — surface it.
+        this.setState({ loading: false, error: json.error || `Request failed (${res.status})`, data: null, demo: false });
+        return;
+      }
+      this.setState({ loading: false, error: null, data: json, demo: false });
+    } catch (e) {
+      // Network-level failure (e.g. sandbox preview with no functions runtime) — show demo data.
+      this.setState({ loading: false, error: null, data: buildDemoData(), demo: true });
+    }
+  }
+
+  renderVals() {
+    const { loading, error, data, demo } = this.state;
+    const refresh = () => this.load();
+
+    if (loading) {
+      return { isLoading: true, hasError: false, hasData: false, refresh };
+    }
+    if (error || !data) {
+      return {
+        isLoading: false,
+        hasError: true,
+        hasData: false,
+        errorMessage: error || "No data returned.",
+        refresh,
+      };
+    }
+
+    const totals = data.totals || {};
+    const statCards = [
+      { label: "Sent", value: totals.sent ?? 0, color: "#1d1d1f" },
+      { label: "Delivered", value: totals.delivered ?? 0, color: "#0071e3" },
+      { label: "Open rate", value: pct(totals.openRate), color: "#af52de" },
+      { label: "Reply rate", value: pct(totals.replyRate), color: "#34c759" },
+      { label: "Bounce rate", value: pct(totals.bounceRate), color: "#ff3b30" },
+    ];
+
+    const timeline = data.timeline || [];
+    const maxCount = Math.max(1, ...timeline.map((t) => t.count));
+    const timelineBars = timeline.map((t) => ({
+      height: `${Math.max(4, Math.round((t.count / maxCount) * 130))}px`,
+      opacity: 0.55 + 0.45 * (t.count / maxCount),
+      title: `${t.date}: ${t.count} sent`,
+    }));
+
+    const campaigns = data.campaigns || [];
+    const campaignRows = campaigns.map((c) => ({
+      name: c.name,
+      summary: `${c.sent} sent · ${pct(c.sent ? c.opened / c.sent : 0)} opened · ${pct(c.sent ? c.replied / c.sent : 0)} replied`,
+      openPct: pct(c.sent ? c.opened / c.sent : 0),
+      replyPct: pct(c.sent ? c.replied / c.sent : 0),
+      bouncePct: pct(c.sent ? c.bounced / c.sent : 0),
+    }));
+
+    const emails = data.emails || [];
+    const emailRows = emails.map((e) => {
+      const sc = STATUS_COLORS[e.status] || { color: "rgba(60,60,67,0.6)", bg: "rgba(0,0,0,0.05)" };
+      return {
+        to: e.to,
+        subject: e.subject,
+        campaign: e.campaign,
+        status: e.status,
+        statusColor: sc.color,
+        statusBg: sc.bg,
+        sentAt: fmtDate(e.sentAt),
+      };
+    });
+
+    return {
+      isLoading: false,
+      hasError: false,
+      hasData: true,
+      isDemo: !!demo,
+      lastUpdatedLabel: `Updated ${new Date(data.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+      windowDaysLabel: `${data.windowDays || 30} days`,
+      statCards,
+      hasTimeline: timelineBars.length > 0,
+      timelineBars,
+      hasCampaigns: campaignRows.length > 0,
+      campaignRows,
+      hasEmails: emailRows.length > 0,
+      emailCountLabel: emailRows.length,
+      emailRows,
+      refresh,
+    };
+  }
+}
+
+</script>
+</body>
+</html>
