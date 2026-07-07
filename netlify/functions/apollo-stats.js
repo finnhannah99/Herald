@@ -89,6 +89,7 @@ async function fetchCampaignNames(apiKey) {
 async function fetchAllMessages(apiKey, minDate, maxDate, campaignIds) {
   const perPage = 100;
   const maxPages = 100; // safety cap: up to 10,000 messages (Apollo allows up to 500 pages/50,000 total)
+  const pacingMs = 1300; // stay under Apollo's 50 requests/minute limit on this endpoint
   let all = [];
   for (let page = 1; page <= maxPages; page++) {
     const params = {
@@ -108,11 +109,16 @@ async function fetchAllMessages(apiKey, minDate, maxDate, campaignIds) {
     // Apollo's pagination metadata key isn't consistently documented, and trusting
     // a missing/mis-keyed field caused this to stop after page 1 previously.
     if (batch.length < perPage) break;
+    if (page < maxPages) await sleep(pacingMs);
   }
   return all;
 }
 
-async function apolloFetch(apiKey, url, params, arrayParams) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function apolloFetch(apiKey, url, params, arrayParams, attempt = 1) {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
     if (v !== undefined && v !== null && v !== "") qs.set(k, v);
@@ -126,6 +132,13 @@ async function apolloFetch(apiKey, url, params, arrayParams) {
     method: "GET",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, accept: "application/json" },
   });
+  if (res.status === 429 && attempt <= 4) {
+    // Rate-limited — back off and retry a few times before giving up.
+    const retryAfterHeader = parseFloat(res.headers.get("retry-after"));
+    const waitMs = !isNaN(retryAfterHeader) ? retryAfterHeader * 1000 : attempt * 4000;
+    await sleep(waitMs);
+    return apolloFetch(apiKey, url, params, arrayParams, attempt + 1);
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`Apollo API ${res.status} on ${url}: ${body.slice(0, 300)}`);
