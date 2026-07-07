@@ -8,7 +8,8 @@
 //   3. Redeploy. The dashboard calls GET /.netlify/functions/apollo-stats.
 //
 // Optional query params on the function itself:
-//   ?days=30              -> how many days back to pull (default 30, max 180)
+//   ?days=30              -> how many days back to pull (default 30, max 365, or "all")
+//   ?from=YYYY-MM-DD&to=YYYY-MM-DD -> explicit custom date range (overrides ?days)
 //   ?campaign_ids=id1,id2 -> restrict to specific sequences (comma-separated Apollo campaign ids)
 
 const BASE = "https://api.apollo.io/api/v1";
@@ -19,17 +20,31 @@ exports.handler = async (event) => {
     return respond(500, { error: "APOLLO_API_KEY is not set in Netlify environment variables." });
   }
 
+  const fromParam = event.queryStringParameters?.from;
+  const toParam = event.queryStringParameters?.to;
+  const hasCustomRange = !!(fromParam && toParam);
+
   const daysParam = event.queryStringParameters?.days || "30";
-  const isAllTime = daysParam === "all";
-  const days = isAllTime ? null : Math.min(parseInt(daysParam, 10) || 30, 365);
+  const isAllTime = !hasCustomRange && daysParam === "all";
+  const days = !hasCustomRange && !isAllTime ? Math.min(parseInt(daysParam, 10) || 30, 365) : null;
+
   const campaignIds = (event.queryStringParameters?.campaign_ids || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const maxDate = new Date();
-  const minDate = new Date();
-  if (!isAllTime) minDate.setDate(minDate.getDate() - days);
-  const fmt = (d) => d.toISOString().slice(0, 10);
+
+  let minDate = null, maxDate = null;
+  if (hasCustomRange) {
+    minDate = fromParam;
+    maxDate = toParam;
+  } else if (!isAllTime) {
+    const maxD = new Date();
+    const minD = new Date();
+    minD.setDate(minD.getDate() - days);
+    const fmt = (d) => d.toISOString().slice(0, 10);
+    minDate = fmt(minD);
+    maxDate = fmt(maxD);
+  }
 
   try {
     // 1. Pull sequence (campaign) names so we can label the per-campaign breakdown
@@ -39,7 +54,7 @@ exports.handler = async (event) => {
 
     // 2. Pull outreach emails (paginated), scoped to the date window (if any)
     //    and, optionally, to specific sequences.
-    const messages = await fetchAllMessages(apiKey, isAllTime ? null : fmt(minDate), isAllTime ? null : fmt(maxDate), campaignIds);
+    const messages = await fetchAllMessages(apiKey, minDate, maxDate, campaignIds);
 
     // 3. Aggregate.
     const stats = aggregate(messages, campaignNames);
@@ -47,7 +62,8 @@ exports.handler = async (event) => {
 
     return respond(200, {
       generatedAt: new Date().toISOString(),
-      windowDays: isAllTime ? "all" : days,
+      windowDays: hasCustomRange ? null : (isAllTime ? "all" : days),
+      customRange: hasCustomRange ? { from: fromParam, to: toParam } : null,
       availableCampaigns,
       ...stats,
     });
