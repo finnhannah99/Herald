@@ -9,7 +9,7 @@
 <x-dc>
 <template id="__bundler_thumbnail" data-bg-color="#1d1d1f">
   <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1200" height="800" fill="#1d1d1f"/>
+    <rect width="1200" height="800" fill="#1d1d1f"></rect>
     <text x="600" y="420" font-family="sans-serif" font-size="120" fill="#ffffff" text-anchor="middle" font-weight="700">H</text>
   </svg>
 </template>
@@ -68,10 +68,29 @@
       </sc-if>
 
       <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-bottom: 16px;">
-        <div style="display: flex; align-items: center; gap: 3px; background: rgba(255,255,255,0.6); border-radius: 999px; padding: 4px;">
-          <sc-for list="{{ dayOptions }}" as="opt" hint-placeholder-count="5">
-            <button type="button" onClick="{{ opt.select }}" style="font-family: inherit; font-size: 13px; font-weight: 600; border: none; border-radius: 999px; padding: 7px 14px; cursor: pointer; color: {{ opt.color }}; background: {{ opt.bg }}; transition: background .15s ease, color .15s ease;">{{ opt.label }}</button>
-          </sc-for>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 3px; background: rgba(255,255,255,0.6); border-radius: 999px; padding: 4px;">
+            <sc-for list="{{ dayOptions }}" as="opt" hint-placeholder-count="5">
+              <button type="button" onClick="{{ opt.select }}" style="font-family: inherit; font-size: 13px; font-weight: 600; border: none; border-radius: 999px; padding: 7px 14px; cursor: pointer; color: {{ opt.color }}; background: {{ opt.bg }}; transition: background .15s ease, color .15s ease;">{{ opt.label }}</button>
+            </sc-for>
+          </div>
+          <div style="position: relative;">
+            <button type="button" onClick="{{ toggleCustomPanel }}" style="font-family: inherit; font-size: 13px; font-weight: 600; border: none; border-radius: 999px; padding: 9px 16px; cursor: pointer; color: {{ isCustomActive_color }}; background: {{ isCustomActive_bg }}; white-space: nowrap;">{{ customLabel }}</button>
+            <sc-if value="{{ customPanelOpen }}">
+              <div style="position: absolute; top: calc(100% + 8px); left: 0; z-index: 60; background: #fff; border-radius: 14px; padding: 16px; box-shadow: 0 24px 48px -20px rgba(0,0,0,0.28); display: flex; flex-direction: column; gap: 12px; min-width: 220px;">
+                <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: rgba(60,60,67,0.6);">From
+                  <input type="date" value="{{ customFromDraft }}" onChange="{{ onCustomFromChange }}" style="font-family: inherit; font-size: 13px; padding: 7px 10px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12);">
+                </label>
+                <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: rgba(60,60,67,0.6);">To
+                  <input type="date" value="{{ customToDraft }}" onChange="{{ onCustomToChange }}" style="font-family: inherit; font-size: 13px; padding: 7px 10px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12);">
+                </label>
+                <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px;">
+                  <button type="button" onClick="{{ cancelCustomPanel }}" style="font-family: inherit; font-size: 13px; font-weight: 600; color: #1d1d1f; background: rgba(0,0,0,0.05); border: none; border-radius: 999px; padding: 7px 14px; cursor: pointer;">Cancel</button>
+                  <button type="button" onClick="{{ applyCustomRange }}" disabled="{{ customApplyDisabled }}" style="font-family: inherit; font-size: 13px; font-weight: 600; color: #fff; background: #0071e3; border: none; border-radius: 999px; padding: 7px 14px; cursor: pointer; opacity: {{ customApplyOpacity }};">Apply</button>
+                </div>
+              </div>
+            </sc-if>
+          </div>
         </div>
         <sc-if value="{{ hasCampaignChips }}">
           <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end;">
@@ -83,7 +102,7 @@
       </div>
 
       <div style="display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 20px;">
-        <h1 style="font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0;">Last {{ windowDaysLabel }}</h1>
+        <h1 style="font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0;">{{ windowHeading }}</h1>
         <sc-if value="{{ isRefreshing }}">
           <span style="font-size: 12px; color: rgba(60,60,67,0.5);">Updating…</span>
         </sc-if>
@@ -109,7 +128,7 @@
             </sc-for>
           </div>
         </sc-if>
-        <sc-if value="{{ hasTimeline }}" hint-placeholder-val="{{ false }}">
+        <sc-if value="{{ noTimeline }}">
           <div style="font-size: 13px; color: rgba(60,60,67,0.5); padding: 20px 0;">No dated sends in this window yet.</div>
         </sc-if>
       </div>
@@ -134,26 +153,47 @@
             </sc-for>
           </div>
         </sc-if>
-        <sc-if value="{{ hasCampaigns }}" hint-placeholder-val="{{ false }}">
+        <sc-if value="{{ noCampaigns }}">
           <div style="font-size: 13px; color: rgba(60,60,67,0.5);">No sequences found in this window.</div>
         </sc-if>
       </div>
 
-      <!-- individual emails -->
-      <div style="background: rgba(255,255,255,0.72); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border-radius: 18px; padding: 24px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 16px 32px -22px rgba(0,0,0,0.18);">
-        <div style="font-size: 15px; font-weight: 700; margin-bottom: 18px;">Sent emails ({{ emailCountLabel }})</div>
-        <div style="max-height: 480px; overflow-y: auto; border-radius: 12px;">
-          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-            <thead>
-              <tr style="position: sticky; top: 0; background: rgba(255,255,255,0.95); text-align: left;">
-                <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Recipient</th>
-                <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Subject</th>
-                <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Sequence</th>
-                <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Status</th>
-                <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Sent</th>
-              </tr>
-            </thead>
-            <tbody>
+    </sc-if>
+
+    <!-- ==================== individual emails (own filters, independent of the controls above) ==================== -->
+    <div style="background: rgba(255,255,255,0.72); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border-radius: 18px; padding: 24px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 16px 32px -22px rgba(0,0,0,0.18); margin-top: 32px;">
+      <div style="font-size: 15px; font-weight: 700; margin-bottom: 16px;">Sent emails ({{ emailCountLabel }})</div>
+      <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px;">
+        <input type="text" placeholder="Search recipient…" value="{{ emailQuery }}" onChange="{{ onQueryChange }}" style="font-family: inherit; font-size: 13px; padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.08); background: #fff; min-width: 180px; flex: 1 1 180px;">
+        <select onChange="{{ onSubjectChange }}" style="font-family: inherit; font-size: 13px; padding: 8px 12px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.08); background: #fff; max-width: 220px;">
+          <sc-for list="{{ subjectOptions }}" as="opt" hint-placeholder-count="1">
+            <option value="{{ opt.value }}">{{ opt.label }}</option>
+          </sc-for>
+        </select>
+        <select onChange="{{ onSequenceChange }}" style="font-family: inherit; font-size: 13px; padding: 8px 12px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.08); background: #fff; max-width: 200px;">
+          <sc-for list="{{ sequenceOptions }}" as="opt" hint-placeholder-count="1">
+            <option value="{{ opt.value }}">{{ opt.label }}</option>
+          </sc-for>
+        </select>
+        <select onChange="{{ onStatusChange }}" style="font-family: inherit; font-size: 13px; padding: 8px 12px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.08); background: #fff; max-width: 170px;">
+          <sc-for list="{{ statusOptions }}" as="opt" hint-placeholder-count="1">
+            <option value="{{ opt.value }}">{{ opt.label }}</option>
+          </sc-for>
+        </select>
+      </div>
+      <div style="max-height: 480px; overflow-y: auto; border-radius: 12px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr style="position: sticky; top: 0; background: rgba(255,255,255,0.95); text-align: left;">
+              <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Recipient</th>
+              <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Subject</th>
+              <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Sequence</th>
+              <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Status</th>
+              <th style="padding: 10px 12px; font-weight: 600; color: rgba(60,60,67,0.55); font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase;">Sent</th>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-if value="{{ emailsReady }}" hint-placeholder-val="{{ false }}">
               <sc-for list="{{ emailRows }}" as="row" hint-placeholder-count="8">
                 <tr style="border-top: 1px solid rgba(0,0,0,0.05);">
                   <td style="padding: 10px 12px; color: #1d1d1f;">{{ row.to }}</td>
@@ -163,18 +203,17 @@
                   <td style="padding: 10px 12px; color: rgba(60,60,67,0.5); white-space: nowrap;">{{ row.sentAt }}</td>
                 </tr>
               </sc-for>
-            </tbody>
-          </table>
-          <sc-if value="{{ hasEmails }}" hint-placeholder-val="{{ true }}">
-            <div></div>
-          </sc-if>
-          <sc-if value="{{ hasEmails }}" hint-placeholder-val="{{ false }}">
-            <div style="font-size: 13px; color: rgba(60,60,67,0.5); padding: 16px 12px;">No individual emails in this window.</div>
-          </sc-if>
-        </div>
+            </sc-if>
+            <sc-if value="{{ emailsLoading }}">
+              <tr><td colspan="5" style="padding: 16px 12px; color: rgba(60,60,67,0.5);">Loading emails…</td></tr>
+            </sc-if>
+          </tbody>
+        </table>
+        <sc-if value="{{ noEmails }}">
+          <div style="font-size: 13px; color: rgba(60,60,67,0.5); padding: 16px 12px;">No emails match these filters.</div>
+        </sc-if>
       </div>
-
-    </sc-if>
+    </div>
 
   </div>
 </div>
@@ -204,7 +243,19 @@ function fmtDate(iso) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-const DAY_CHOICES = [7, 14, 30, 60, 90, "all"];
+const DAY_CHOICES = [7, 14, 30, 60, "all"];
+
+function todayMinus(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+function fmtShortDate(iso) {
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
 
 const DEMO_CAMPAIGNS_META = [
   { id: "c1", name: "Growth Marketer Outreach" },
@@ -242,11 +293,20 @@ function buildDemoPool() {
 }
 
 function aggregateEmails(pool, availableCampaigns, days, campaignIdsFilter) {
+  const isCustom = days && typeof days === "object" && days.from && days.to;
   const isAllTime = days === "all";
-  const cutoff = new Date();
-  if (!isAllTime) cutoff.setDate(cutoff.getDate() - days);
+  let cutoff = null, upper = null;
+  if (isCustom) {
+    cutoff = new Date(days.from + "T00:00:00");
+    upper = new Date(days.to + "T23:59:59");
+  } else if (!isAllTime) {
+    cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+  }
   const filtered = pool.filter((e) => {
-    if (!isAllTime && new Date(e.sentAt) < cutoff) return false;
+    const t = new Date(e.sentAt);
+    if (cutoff && t < cutoff) return false;
+    if (upper && t > upper) return false;
     if (campaignIdsFilter && campaignIdsFilter.length && !campaignIdsFilter.includes(e.campaignId)) return false;
     return true;
   });
@@ -283,7 +343,8 @@ function aggregateEmails(pool, availableCampaigns, days, campaignIdsFilter) {
 
   return {
     generatedAt: new Date().toISOString(),
-    windowDays: days,
+    windowDays: isCustom ? null : days,
+    customRange: isCustom ? { from: days.from, to: days.to } : null,
     availableCampaigns,
     totals: {
       sent,
@@ -302,11 +363,48 @@ function aggregateEmails(pool, availableCampaigns, days, campaignIdsFilter) {
 }
 
 class Component extends DCLogic {
-  state = { loading: true, refreshing: false, error: null, data: null, demo: false, days: 30, selectedCampaignIds: [] };
+  state = {
+    loading: true, refreshing: false, error: null, data: null, demo: false, days: 30, selectedCampaignIds: [],
+    emailsAll: null, emailsLoading: true,
+    emailQuery: "", emailSubject: "", emailSequence: "", emailStatus: "",
+    customPanelOpen: false, customFromDraft: "", customToDraft: "",
+  };
 
   componentDidMount() {
     this.load(30, []);
+    this.loadAllEmails();
   }
+
+  async loadAllEmails() {
+    this.setState({ emailsLoading: true });
+    try {
+      const res = await fetch(`/.netlify/functions/apollo-stats?days=all`);
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        this.applyDemoEmails();
+        return;
+      }
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        this.applyDemoEmails();
+        return;
+      }
+      this.setState({ emailsLoading: false, emailsAll: json });
+    } catch (e) {
+      this.applyDemoEmails();
+    }
+  }
+
+  applyDemoEmails() {
+    if (!this._demoPool) this._demoPool = buildDemoPool();
+    const data = aggregateEmails(this._demoPool, DEMO_CAMPAIGNS_META, "all", []);
+    this.setState({ emailsLoading: false, emailsAll: data });
+  }
+
+  setEmailQuery = (v) => this.setState({ emailQuery: v });
+  setEmailSubject = (v) => this.setState({ emailSubject: v });
+  setEmailSequence = (v) => this.setState({ emailSequence: v });
+  setEmailStatus = (v) => this.setState({ emailStatus: v });
 
   selectDays = (d) => this.load(d, this.state.selectedCampaignIds);
 
@@ -318,11 +416,38 @@ class Component extends DCLogic {
 
   clearCampaigns = () => this.load(this.state.days, []);
 
+  toggleCustomPanel = () => {
+    const opening = !this.state.customPanelOpen;
+    this.setState({
+      customPanelOpen: opening,
+      customFromDraft: opening ? (this.state.customFromDraft || todayMinus(30)) : this.state.customFromDraft,
+      customToDraft: opening ? (this.state.customToDraft || todayMinus(0)) : this.state.customToDraft,
+    });
+  };
+
+  cancelCustomPanel = () => this.setState({ customPanelOpen: false });
+
+  setCustomFrom = (v) => this.setState({ customFromDraft: v });
+  setCustomTo = (v) => this.setState({ customToDraft: v });
+
+  applyCustomRange = () => {
+    const { customFromDraft, customToDraft } = this.state;
+    if (!customFromDraft || !customToDraft) return;
+    this.setState({ customPanelOpen: false });
+    this.load({ from: customFromDraft, to: customToDraft }, this.state.selectedCampaignIds);
+  };
+
   async load(days, campaignIds) {
     const isInitial = !this.state.data;
     this.setState({ loading: isInitial, refreshing: !isInitial, error: null });
     try {
-      const qs = new URLSearchParams({ days: String(days) });
+      const qs = new URLSearchParams();
+      if (days && typeof days === "object" && days.from && days.to) {
+        qs.set("from", days.from);
+        qs.set("to", days.to);
+      } else {
+        qs.set("days", String(days));
+      }
       if (campaignIds && campaignIds.length) qs.set("campaign_ids", campaignIds.join(","));
       const res = await fetch(`/.netlify/functions/apollo-stats?${qs.toString()}`);
       const contentType = res.headers.get("content-type") || "";
@@ -348,11 +473,63 @@ class Component extends DCLogic {
   }
 
   renderVals() {
-    const { loading, error, data, demo, refreshing, days, selectedCampaignIds } = this.state;
+    const { loading, error, data, demo, refreshing, days, selectedCampaignIds, emailsAll, emailsLoading, emailQuery, emailSubject, emailSequence, emailStatus, customPanelOpen, customFromDraft, customToDraft } = this.state;
     const refresh = () => this.load(days, selectedCampaignIds);
 
+    // ---- Sent-emails table: independent of the top day/sequence controls ----
+    const allEmails = (emailsAll && emailsAll.emails) || [];
+    const uniqueSubjects = [...new Set(allEmails.map((e) => e.subject))];
+    const uniqueSequences = [...new Set(allEmails.map((e) => e.campaign))];
+    const uniqueStatuses = [...new Set(allEmails.map((e) => e.status))];
+    const q = (emailQuery || "").trim().toLowerCase();
+    const filteredEmails = allEmails.filter((e) => {
+      if (q && !(e.to || "").toLowerCase().includes(q)) return false;
+      if (emailSubject && e.subject !== emailSubject) return false;
+      if (emailSequence && e.campaign !== emailSequence) return false;
+      if (emailStatus && e.status !== emailStatus) return false;
+      return true;
+    });
+    const emailRows = filteredEmails.map((e) => {
+      const sc = STATUS_COLORS[e.status] || { color: "rgba(60,60,67,0.6)", bg: "rgba(0,0,0,0.05)" };
+      return {
+        to: e.to,
+        subject: e.subject,
+        campaign: e.campaign,
+        status: e.status,
+        statusColor: sc.color,
+        statusBg: sc.bg,
+        sentAt: fmtDate(e.sentAt),
+      };
+    });
+    const emailCountLabel = emailsLoading ? "…" : `${filteredEmails.length} of ${allEmails.length}`;
+    const subjectOptions = [{ value: "", label: "All subjects" }, ...uniqueSubjects.map((s) => ({ value: s, label: s }))];
+    const sequenceOptions = [{ value: "", label: "All sequences" }, ...uniqueSequences.map((s) => ({ value: s, label: s }))];
+    const statusOptions = [{ value: "", label: "All statuses" }, ...uniqueStatuses.map((s) => ({ value: s, label: s }))];
+    const onQueryChange = (e) => this.setEmailQuery(e.target.value);
+    const onSubjectChange = (e) => this.setEmailSubject(e.target.value);
+    const onSequenceChange = (e) => this.setEmailSequence(e.target.value);
+    const onStatusChange = (e) => this.setEmailStatus(e.target.value);
+
+    const emailsReady = !emailsLoading;
+    const emailsSectionVals = {
+      hasEmails: emailRows.length > 0,
+      noEmails: emailsReady && emailRows.length === 0,
+      emailCountLabel,
+      emailRows,
+      emailQuery,
+      onQueryChange,
+      subjectOptions,
+      sequenceOptions,
+      statusOptions,
+      onSubjectChange,
+      onSequenceChange,
+      onStatusChange,
+      emailsLoading: !!emailsLoading,
+      emailsReady,
+    };
+
     if (loading) {
-      return { isLoading: true, hasError: false, hasData: false, lastUpdatedLabel: "", refresh };
+      return { isLoading: true, hasError: false, hasData: false, lastUpdatedLabel: "", refresh, ...emailsSectionVals };
     }
     if (error || !data) {
       return {
@@ -362,6 +539,7 @@ class Component extends DCLogic {
         lastUpdatedLabel: "",
         errorMessage: error || "No data returned.",
         refresh,
+        ...emailsSectionVals,
       };
     }
 
@@ -391,22 +569,9 @@ class Component extends DCLogic {
       bouncePct: pct(c.sent ? c.bounced / c.sent : 0),
     }));
 
-    const emails = data.emails || [];
-    const emailRows = emails.map((e) => {
-      const sc = STATUS_COLORS[e.status] || { color: "rgba(60,60,67,0.6)", bg: "rgba(0,0,0,0.05)" };
-      return {
-        to: e.to,
-        subject: e.subject,
-        campaign: e.campaign,
-        status: e.status,
-        statusColor: sc.color,
-        statusBg: sc.bg,
-        sentAt: fmtDate(e.sentAt),
-      };
-    });
-
+    const isCustom = !!(data.customRange);
     const dayOptions = DAY_CHOICES.map((d) => {
-      const active = d === days;
+      const active = !isCustom && d === days;
       return {
         label: d === "all" ? "All time" : `${d}d`,
         select: () => this.selectDays(d),
@@ -414,6 +579,11 @@ class Component extends DCLogic {
         bg: active ? "#0071e3" : "transparent",
       };
     });
+
+    const customLabel = isCustom ? `${fmtShortDate(data.customRange.from)} – ${fmtShortDate(data.customRange.to)}` : "Custom range";
+    const onCustomFromChange = (e) => this.setCustomFrom(e.target.value);
+    const onCustomToChange = (e) => this.setCustomTo(e.target.value);
+    const customApplyDisabled = !customFromDraft || !customToDraft;
 
     const availableCampaigns = data.availableCampaigns || [];
     const chipDefs = [{ id: null, label: "All sequences" }, ...availableCampaigns.map((c) => ({ id: c.id, label: c.name }))];
@@ -434,19 +604,34 @@ class Component extends DCLogic {
       isDemo: !!demo,
       isRefreshing: !!refreshing,
       lastUpdatedLabel: `Updated ${new Date(data.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
-      windowDaysLabel: data.windowDays === "all" ? "all time" : `${data.windowDays || 30} days`,
+      windowDaysLabel: isCustom ? `${fmtShortDate(data.customRange.from)} – ${fmtShortDate(data.customRange.to)}` : (data.windowDays === "all" ? "all time" : `${data.windowDays || 30} days`),
+      windowHeading: isCustom ? `${fmtShortDate(data.customRange.from)} – ${fmtShortDate(data.customRange.to)}` : (data.windowDays === "all" ? "All time" : `Last ${data.windowDays || 30} days`),
       dayOptions,
+      customLabel,
+      isCustomActive: isCustom,
+      isCustomActive_color: isCustom ? "#ffffff" : "#1d1d1f",
+      isCustomActive_bg: isCustom ? "#0071e3" : "rgba(255,255,255,0.6)",
+      customPanelOpen: !!customPanelOpen,
+      customFromDraft: customFromDraft || "",
+      customToDraft: customToDraft || "",
+      customApplyDisabled,
+      customApplyOpacity: customApplyDisabled ? 0.5 : 1,
+      onCustomFromChange,
+      onCustomToChange,
+      toggleCustomPanel: this.toggleCustomPanel,
+      cancelCustomPanel: this.cancelCustomPanel,
+      applyCustomRange: this.applyCustomRange,
       hasCampaignChips: campaignChips.length > 1,
       campaignChips,
       statCards,
       hasTimeline: timelineBars.length > 0,
+      noTimeline: timelineBars.length === 0,
       timelineBars,
       hasCampaigns: campaignRows.length > 0,
+      noCampaigns: campaignRows.length === 0,
       campaignRows,
-      hasEmails: emailRows.length > 0,
-      emailCountLabel: emailRows.length,
-      emailRows,
       refresh,
+      ...emailsSectionVals,
     };
   }
 }
